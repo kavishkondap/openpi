@@ -1,3 +1,6 @@
+#venv
+openpi_venv
+
 # Data directories.
 assets/
 checkpoints/
