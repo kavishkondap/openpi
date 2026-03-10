@@ -98,6 +98,9 @@ class RepackTransform(DataTransformFn):
 
     def __call__(self, data: DataDict) -> DataDict:
         flat_item = flatten_dict(data)
+        # print("DEBUG: self.structure=", self.structure)
+        # print("DEBUG: data=", data)
+        # print("DEBUG: flat_item=", flat_item)
         return jax.tree.map(lambda k: flat_item[k], self.structure)
 
 
@@ -417,6 +420,7 @@ def apply_tree(
             if k not in tree:
                 raise ValueError(f"Selector key {k} not found in tree")
 
+    # print("DEBUG: tree.items()=", tree.items())
     return unflatten_dict({k: transform(k, v) for k, v in tree.items()})
 
 
