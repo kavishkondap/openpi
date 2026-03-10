@@ -1029,7 +1029,7 @@ _CONFIGS = [
         # max_token_len). A good rule of thumb is to use approx 180 for single-arm robots, and approx 250 for
         # two-arm robots. Generally, err on the lower side here first, and potentially increase the value if
         # you see many warnings being thrown during training.
-        model = pi0_config.Pi0Config(action_dim=32, action_horizon=30, max_token_len=180, pi05=True), #action dim needs to be 32 bc thats what pi05 was trained on
+        model = pi0_config.Pi0Config(action_dim=32, action_horizon=45, max_token_len=180, pi05=True), #action dim needs to be 32 bc thats what pi05 was trained on
         data = LeRobotUR5DataConfig(
             repo_id="/home/kavishk/.cache/huggingface/lerobot/tiger_picking_lerobot",
 

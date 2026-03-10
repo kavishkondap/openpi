@@ -11,7 +11,7 @@ checkpoint_dir = "/home/kavishk/openpi/checkpoints/pi05_ur5/run4/29999"
 policy = policy_config.create_trained_policy(config, checkpoint_dir)
 
 example = {
-        "base_rgb": np.random.randint(256, size=(224, 224, 3), dtype=np.uint8),
+        "base_rgb": np.random.randint(256, size=(1080, 224, 3), dtype=np.uint8),
         "wrist_rgb": np.random.randint(256, size=(224, 224, 3), dtype=np.uint8),
         "joints": np.random.rand(7),
         "prompt": "do something",
