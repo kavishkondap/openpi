@@ -56,3 +56,41 @@ def _resize_with_pad_pil(image: Image.Image, height: int, width: int, method: in
     zero_image.paste(resized_image, (pad_width, pad_height))
     assert zero_image.size == (width, height)
     return zero_image
+
+def crop(images: np.ndarray, aspect_ratio: float) -> np.ndarray:
+    """
+    Crops a batch of images to a target aspect ratio using only NumPy.
+    
+    Args:
+        images: [..., H, W, C] array
+        aspect_ratio: desired width / height
+    
+    Returns:
+        Cropped images as a NumPy array with shape [..., new_h, new_w, C]
+    """
+    # Flatten batch dimensions
+    orig_shape = images.shape
+    flat_images = images.reshape(-1, *orig_shape[-3:])
+    batch_size = flat_images.shape[0]
+    
+    cropped = []
+    for img in flat_images:
+        h, w, c = img.shape
+        cur_ratio = w / h
+        if cur_ratio > aspect_ratio:
+            # Too wide → crop width
+            new_w = int(h * aspect_ratio)
+            left = (w - new_w) // 2
+            cropped_img = img[:, left:left+new_w, :]
+        elif cur_ratio < aspect_ratio:
+            # Too tall → crop height
+            new_h = int(w / aspect_ratio)
+            top = (h - new_h) // 2
+            cropped_img = img[top:top+new_h, :, :]
+        else:
+            cropped_img = img  # no crop
+        cropped.append(cropped_img)
+    
+    # Stack and reshape
+    cropped = np.stack(cropped, axis=0)
+    return cropped.reshape(*orig_shape[:-3], *cropped.shape[1:])

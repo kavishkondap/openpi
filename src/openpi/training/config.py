@@ -21,6 +21,7 @@ import openpi.policies.aloha_policy as aloha_policy
 import openpi.policies.droid_policy as droid_policy
 import openpi.policies.libero_policy as libero_policy
 import openpi.policies.ur5_policy as ur5_policy
+import openpi.policies.bimanual_yam_policy as bimanual_yam_policy
 import openpi.shared.download as _download
 import openpi.shared.normalize as _normalize
 import openpi.training.droid_rlds_dataset as droid_rlds_dataset
@@ -462,7 +463,6 @@ class LeRobotDROIDDataConfig(DataConfigFactory):
             model_transforms=model_transforms,
         )
 
-#KAVISH ADDED
 @dataclasses.dataclass(frozen=True)
 class LeRobotUR5DataConfig(DataConfigFactory):
 
@@ -478,12 +478,13 @@ class LeRobotUR5DataConfig(DataConfigFactory):
             inputs=[
                 _transforms.RepackTransform(
                     {
-                        "base_rgb": "exo_cam",
-                        "wrist_rgb": "wrist_cam",
-                        "joints": "joint_position",
+                        "states": "states",
+                        "exo_image": "exo_image",
+                        "wrist_right_image":"wrist_right_image",
+                        "wrist_left_image":"wrist_left_image",
                         "actions":"actions",
                         # "gripper": "gripper",
-                        "prompt": "prompt",
+                        # "task": "prompt",
                     }
                 )
             ]
@@ -501,6 +502,59 @@ class LeRobotUR5DataConfig(DataConfigFactory):
         delta_action_mask = _transforms.make_bool_mask(6, -1)
         data_transforms = data_transforms.push(
             inputs=[_transforms.DeltaActions(delta_action_mask)],
+            outputs=[_transforms.AbsoluteActions(delta_action_mask)],
+        )
+
+        # Model transforms include things like tokenizing the prompt and action targets
+        # You do not need to change anything here for your own dataset.
+        model_transforms = ModelTransformFactory()(model_config)
+
+        # We return all data transforms for training and inference. No need to change anything here.
+        return dataclasses.replace(
+            self.create_base_config(asset_dirs, model_config),
+            repack_transforms=repack_transform,
+            data_transforms=data_transforms,
+            model_transforms=model_transforms,
+        )
+
+dataclasses.dataclass(frozen=True)
+class LeRobotBimanualYAMDataConfig(DataConfigFactory):
+
+    """
+    used to define transforms that are for diff parts of the data pipeline 
+    """
+
+    @override
+    def create(self, asset_dirs: pathlib.Path, model_config: _model.BaseModelConfig) -> DataConfig:
+        
+        # Boilerplate for remapping keys from the LeRobot dataset. We assume no renaming needed here.
+        repack_transform = _transforms.Group(
+            inputs=[
+                _transforms.RepackTransform(
+                    {
+                        "state": "states",
+                        "exo_image": "exo_image",
+                        "wrist_right_image":"wrist_right_image",
+                        "wrist_left_image":"wrist_left_image",
+                        "actions":"actions",
+                        "prompt":"prompt"
+                    }
+                )
+            ]
+        )
+
+        # These transforms are the ones we wrote earlier.
+        data_transforms = _transforms.Group(
+            inputs=[bimanual_yam_policy.BimanualYAMInputs(action_dim=model_config.action_dim, model_type=model_config.model_type)],
+            outputs=[bimanual_yam_policy.BimanualYAMOutputs()],
+        )
+
+        # Convert absolute actions to delta actions.
+        # By convention, we do not convert the gripper action (7th dimension).
+        delta_action_mask = _transforms.make_bool_mask(6, -1, 6, -1)
+        data_transforms = data_transforms.push(
+            inputs=[_transforms.DeltaActions(delta_action_mask),
+                     _transforms.CropImages(_model.IMAGE_RESOLUTION[1]/_model.IMAGE_RESOLUTION[0])],
             outputs=[_transforms.AbsoluteActions(delta_action_mask)],
         )
 
@@ -1046,6 +1100,35 @@ _CONFIGS = [
         weight_loader = weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi05_base/params"),
         num_train_steps=30_000,
         num_workers = 16,
+    ),
+    TrainConfig(
+        name = "pi05_bimanual_yam",
+        #action horizon is the length of action chunk desired (30 in 30Hz for 1 second horizon)
+        # The max_token_len is the maximum number of (non-image) tokens the model can handle.
+        # This includes the tokenized prompt, proprioceptive state, and (FAST-tokenized) action tokens.
+        # Choosing this value too small may chop off tokens at the end of your sequence (the code will throw
+        # a warning), while choosing it too large will waste memory (since we pad each batch element to the
+        # max_token_len). A good rule of thumb is to use approx 180 for single-arm robots, and approx 250 for
+        # two-arm robots. Generally, err on the lower side here first, and potentially increase the value if
+        # you see many warnings being thrown during training.
+        project_name="openpi_tshirt_combined_gem",
+        model = pi0_config.Pi0Config(action_dim=32, action_horizon=50, max_token_len=250, pi05=True), #action dim needs to be 32 bc thats what pi05 was trained on
+        data = LeRobotBimanualYAMDataConfig(
+            repo_id="tshirt_combined_gem",
+            assets=AssetsConfig(
+                assets_dir="/home/kavishk/.cache/huggingface/lerobot/", #where normalization stats are saved
+            ),
+            base_config=DataConfig(
+                #whether or not to load the prompt from the LeRobot Dataset
+                prompt_from_task=True,
+            ),
+            
+        ),
+        weight_loader = weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi05_base/params"),
+        num_train_steps=80_000,
+        num_workers = 16,
+        save_interval=5000,
+        keep_period=10000,
     ),
     # RoboArena & PolaRiS configs.
     *roboarena_config.get_roboarena_configs(),

@@ -67,6 +67,7 @@ class CompositeTransform(DataTransformFn):
 
     def __call__(self, data: DataDict) -> DataDict:
         for transform in self.transforms:
+            # print("composite data", data)
             data = transform(data)
         return data
 
@@ -183,6 +184,15 @@ class Unnormalize(DataTransformFn):
             return np.concatenate([(x[..., :dim] + 1.0) / 2.0 * (q99 - q01 + 1e-6) + q01, x[..., dim:]], axis=-1)
         return (x + 1.0) / 2.0 * (q99 - q01 + 1e-6) + q01
 
+
+@dataclasses.dataclass(frozen=True)
+class CropImages(DataTransformFn):
+    """Crops images to the desired aspect ratio"""
+    aspect_ratio: int #width/height, #cols/#rows
+
+    def __call__(self, data: DataDict) -> DataDict:
+        data["image"] = {k: image_tools.crop(v, self.aspect_ratio) for k, v in data["image"].items()}
+        return data
 
 @dataclasses.dataclass(frozen=True)
 class ResizeImages(DataTransformFn):

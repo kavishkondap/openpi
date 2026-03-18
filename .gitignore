@@ -1,5 +1,6 @@
 #venv
 openpi_venv
+nohup.out
 
 # Data directories.
 assets/
@@ -8,6 +9,7 @@ data/
 wandb/
 
 # Byte-compiled / optimized / DLL files
+./venv
 __pycache__/
 *.py[cod]
 *$py.class
