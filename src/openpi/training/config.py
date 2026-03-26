@@ -517,7 +517,7 @@ class LeRobotUR5DataConfig(DataConfigFactory):
             model_transforms=model_transforms,
         )
 
-dataclasses.dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class LeRobotBimanualYAMDataConfig(DataConfigFactory):
 
     """
@@ -551,11 +551,15 @@ class LeRobotBimanualYAMDataConfig(DataConfigFactory):
 
         # Convert absolute actions to delta actions.
         # By convention, we do not convert the gripper action (7th dimension).
-        delta_action_mask = _transforms.make_bool_mask(6, -1, 6, -1)
+        # delta_action_mask = _transforms.make_bool_mask(6, -1, 6, -1)
+        # data_transforms = data_transforms.push(
+        #     inputs=[_transforms.DeltaActions(delta_action_mask),
+        #              _transforms.CropImages(_model.IMAGE_RESOLUTION[1]/_model.IMAGE_RESOLUTION[0])],
+        #     outputs=[_transforms.AbsoluteActions(delta_action_mask)],
+        # )
         data_transforms = data_transforms.push(
-            inputs=[_transforms.DeltaActions(delta_action_mask),
-                     _transforms.CropImages(_model.IMAGE_RESOLUTION[1]/_model.IMAGE_RESOLUTION[0])],
-            outputs=[_transforms.AbsoluteActions(delta_action_mask)],
+            inputs=[_transforms.CropImages(_model.IMAGE_RESOLUTION[1]/_model.IMAGE_RESOLUTION[0])],
+            outputs=[],
         )
 
         # Model transforms include things like tokenizing the prompt and action targets
@@ -1129,6 +1133,8 @@ _CONFIGS = [
         num_workers = 16,
         save_interval=5000,
         keep_period=10000,
+        resume=False,
+        overwrite=True,
     ),
     # RoboArena & PolaRiS configs.
     *roboarena_config.get_roboarena_configs(),
