@@ -22,6 +22,7 @@ import openpi.policies.droid_policy as droid_policy
 import openpi.policies.libero_policy as libero_policy
 import openpi.policies.ur5_policy as ur5_policy
 import openpi.policies.bimanual_yam_policy as bimanual_yam_policy
+import openpi.policies.tsh_policy as tsh_policy
 import openpi.shared.download as _download
 import openpi.shared.normalize as _normalize
 import openpi.training.droid_rlds_dataset as droid_rlds_dataset
@@ -573,6 +574,49 @@ class LeRobotBimanualYAMDataConfig(DataConfigFactory):
             data_transforms=data_transforms,
             model_transforms=model_transforms,
         )
+
+@dataclasses.dataclass(frozen=True)
+class LeRobotTSHDataConfig(DataConfigFactory):
+    """
+    Data config for the TSH bimanual Franka robot (16 DOF: 7 joints + 1 gripper per arm).
+    Mirrors LeRobotBimanualYAMDataConfig but uses TSHInputs/TSHOutputs transforms.
+    """
+
+    @override
+    def create(self, asset_dirs: pathlib.Path, model_config: _model.BaseModelConfig) -> DataConfig:
+        repack_transform = _transforms.Group(
+            inputs=[
+                _transforms.RepackTransform(
+                    {
+                        "state": "state",
+                        "exo_image": "exo_image",
+                        "wrist_right_image": "wrist_right_image",
+                        "wrist_left_image": "wrist_left_image",
+                        "actions": "actions",
+                        "prompt": "prompt",
+                    }
+                )
+            ]
+        )
+
+        data_transforms = _transforms.Group(
+            inputs=[tsh_policy.TSHInputs(action_dim=model_config.action_dim, model_type=model_config.model_type)],
+            outputs=[tsh_policy.TSHOutputs()],
+        )
+        data_transforms = data_transforms.push(
+            inputs=[_transforms.CropImages(_model.IMAGE_RESOLUTION[1] / _model.IMAGE_RESOLUTION[0])],
+            outputs=[],
+        )
+
+        model_transforms = ModelTransformFactory()(model_config)
+
+        return dataclasses.replace(
+            self.create_base_config(asset_dirs, model_config),
+            repack_transforms=repack_transform,
+            data_transforms=data_transforms,
+            model_transforms=model_transforms,
+        )
+
 
 @dataclasses.dataclass(frozen=True)
 class TrainConfig:
@@ -1133,6 +1177,25 @@ _CONFIGS = [
         num_workers = 16,
         save_interval=5000,
         keep_period=10000,
+        resume=False,
+        overwrite=True,
+    ),
+    TrainConfig(
+        name="pi05_tsh",
+        project_name="openpi_tsh",
+        model=pi0_config.Pi0Config(action_dim=32, action_horizon=50, max_token_len=250, pi05=True),
+        data=LeRobotTSHDataConfig(
+            repo_id="tsh_dataset1",
+            assets=AssetsConfig(),
+            base_config=DataConfig(
+                prompt_from_task=True,
+            ),
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi05_base/params"),
+        num_train_steps=30_000,
+        num_workers=16,
+        save_interval=5_000,
+        keep_period=10_000,
         resume=False,
         overwrite=True,
     ),
