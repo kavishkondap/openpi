@@ -14,8 +14,6 @@ dependencies = [
     "flax==0.10.2",
     "fsspec[gcs]>=2024.6.0",
     "imageio>=2.36.1",
-    # CPU-only JAX: GPU compute is handled by PyTorch; JAX is only needed for
-    # imports and jax.tree utilities when running PyTorch-mode inference.
     "jax==0.5.3",
     "jaxtyping==0.2.36",
     "lerobot",
@@ -56,13 +54,9 @@ dev = [
 override-dependencies = ["ml-dtypes==0.4.1", "tensorstore==0.1.74"]
 
 [tool.uv.sources]
+# openpi-client is a workspace member declared in the mike root workspace.
 openpi-client = { workspace = true }
 lerobot       = { git = "https://github.com/huggingface/lerobot", rev = "0cf864870cf29f4738d3ade893e6fd13fbd7cdb5" }
-
-# Retained so `uv` inside the openpi dir still works standalone.
-# When openpi is a member of the mike workspace, the outer workspace takes over.
-[tool.uv.workspace]
-members = ["packages/*"]
 
 [build-system]
 requires = ["hatchling"]
