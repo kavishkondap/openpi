@@ -80,4 +80,4 @@ class BimanualYAMOutputs(transforms.DataTransformFn):
 
     def __call__(self, data: dict) -> dict:
         # Since the robot has 7 action dimensions (6 DoF + gripper), return the first 7 dims
-        return {"actions": np.asarray(data["actions"][:, :7])}
+        return {"actions": np.asarray(data["actions"][:, :14])}

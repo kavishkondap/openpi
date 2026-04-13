@@ -31,6 +31,7 @@ import jax
 import numpy as np
 import safetensors.torch
 import torch
+import torch.nn.functional as F
 import tqdm
 import wandb
 
@@ -116,6 +117,80 @@ def save_checkpoint(
         shutil.rmtree(ckpt_dir)
     tmp_dir.rename(ckpt_dir)
     logger.info(f"Saved checkpoint at step {step} to {ckpt_dir}")
+
+
+def compute_stage1_metrics(
+    rl_token_module: RLTokenModule,
+    img_embs: torch.Tensor,
+    img_pad_mask: torch.Tensor | None,
+) -> dict[str, float]:
+    """Reconstruction quality and z_rl mode-collapse diagnostics.
+
+    Runs a no-grad forward through encoder+decoder to get z_hat, then computes:
+      - Reconstruction: MSE, cosine similarity, relative L2 error.
+      - z_rl distribution: per-dim std, active-dim ratio, effective rank and
+        participation ratio of the batch covariance, and mean off-diagonal
+        pairwise cosine similarity. Low effective rank or high pairwise cosine
+        similarity both indicate mode collapse.
+    """
+    was_training = rl_token_module.training
+    rl_token_module.eval()
+    with torch.no_grad():
+        z_bar = img_embs.detach()
+        z_rl = rl_token_module.encoder(z_bar, img_pad_mask)
+        z_hat = rl_token_module.decoder(z_rl, z_bar, img_pad_mask)
+
+        diff = z_hat - z_bar  # [B, M, D]
+        if img_pad_mask is not None:
+            mask = img_pad_mask.unsqueeze(-1).float()
+            denom = mask.sum() * z_bar.shape[-1]
+            recon_mse = (diff.pow(2) * mask).sum() / denom
+            cos_per_tok = F.cosine_similarity(z_hat, z_bar, dim=-1)  # [B, M]
+            cos_sim = (cos_per_tok * img_pad_mask.float()).sum() / img_pad_mask.float().sum().clamp(min=1)
+            rel_err = (diff.pow(2) * mask).sum().sqrt() / ((z_bar.pow(2) * mask).sum().sqrt() + 1e-8)
+        else:
+            recon_mse = diff.pow(2).mean()
+            cos_sim = F.cosine_similarity(z_hat, z_bar, dim=-1).mean()
+            rel_err = diff.norm() / (z_bar.norm() + 1e-8)
+
+        z_rl_f = z_rl.float()
+        B, D = z_rl_f.shape
+        per_dim_std = z_rl_f.std(dim=0, unbiased=False)
+        active_ratio = (per_dim_std > 1e-3).float().mean()
+
+        if B >= 2:
+            centered = z_rl_f - z_rl_f.mean(dim=0, keepdim=True)
+            svals = torch.linalg.svdvals(centered)
+            sq = svals.pow(2)
+            sq_sum = sq.sum().clamp(min=1e-12)
+            p = sq / sq_sum
+            eff_rank = (-(p * p.clamp(min=1e-12).log()).sum()).exp()
+            part_ratio = sq_sum.pow(2) / (sq.pow(2).sum() + 1e-12)
+
+            z_norm = F.normalize(z_rl_f, dim=-1)
+            sim_mat = z_norm @ z_norm.t()
+            off_sum = sim_mat.sum() - sim_mat.diagonal().sum()
+            pair_cos = off_sum / (B * (B - 1))
+        else:
+            eff_rank = torch.tensor(float(D))
+            part_ratio = torch.tensor(float(D))
+            pair_cos = torch.tensor(0.0)
+
+    if was_training:
+        rl_token_module.train()
+
+    return {
+        "stage1/recon_mse": recon_mse.item(),
+        "stage1/recon_cosine_sim": cos_sim.item(),
+        "stage1/recon_relative_l2": rel_err.item(),
+        "stage1/z_rl_std_mean": per_dim_std.mean().item(),
+        "stage1/z_rl_std_min": per_dim_std.min().item(),
+        "stage1/z_rl_std_max": per_dim_std.max().item(),
+        "stage1/z_rl_active_dim_ratio": active_ratio.item(),
+        "stage1/z_rl_effective_rank": eff_rank.item(),
+        "stage1/z_rl_participation_ratio": part_ratio.item(),
+        "stage1/z_rl_pairwise_cos_sim": pair_cos.item(),
+    }
 
 
 def lr_schedule(step: int, warmup_steps: int, peak_lr: float) -> float:
@@ -248,7 +323,7 @@ def train(args: argparse.Namespace) -> None:
             # Backward + optimize.
             optimizer.zero_grad(set_to_none=True)
             total_loss.backward()
-            torch.nn.utils.clip_grad_norm_(params_to_optimize, max_norm=args.gradient_clip)
+            grad_norm = torch.nn.utils.clip_grad_norm_(params_to_optimize, max_norm=args.gradient_clip)
             optimizer.step()
 
             # Logging.
@@ -257,18 +332,25 @@ def train(args: argparse.Namespace) -> None:
                     "stage1/recon_loss": recon_loss.item(),
                     "stage1/total_loss": total_loss.item(),
                     "stage1/lr": current_lr,
-                    "stage1/z_rl_norm": z_rl.detach().norm(dim=-1).mean().item(),
+                    "stage1/grad_norm": float(grad_norm),
+                    "stage1/z_rl_norm": z_rl.detach().float().norm(dim=-1).mean().item(),
                 }
                 if args.joint_vla_finetune:
                     log_dict["stage1/vla_loss"] = vla_loss.item()
-                wandb.log(log_dict, step=global_step)
+
+                log_dict.update(compute_stage1_metrics(rl_token_module, img_embs, img_pad_mask))
 
                 elapsed = time.time() - start_time
                 steps_per_sec = (global_step + 1) / elapsed
+                log_dict["stage1/steps_per_sec"] = steps_per_sec
+                wandb.log(log_dict, step=global_step)
+
                 logger.info(
                     f"Step {global_step} | recon_loss={recon_loss.item():.4f} | "
-                    f"total_loss={total_loss.item():.4f} | lr={current_lr:.2e} | "
-                    f"{steps_per_sec:.1f} steps/s"
+                    f"total_loss={total_loss.item():.4f} | "
+                    f"eff_rank={log_dict['stage1/z_rl_effective_rank']:.1f} | "
+                    f"pair_cos={log_dict['stage1/z_rl_pairwise_cos_sim']:.3f} | "
+                    f"lr={current_lr:.2e} | {steps_per_sec:.1f} steps/s"
                 )
 
             # Save checkpoint.

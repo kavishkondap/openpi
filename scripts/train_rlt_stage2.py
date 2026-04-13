@@ -507,11 +507,10 @@ def train(args: argparse.Namespace) -> None:
             )
 
         # --- Off-policy updates ---
+        critic_losses: list[float] = []
+        actor_losses: list[float] = []
+        bc_losses: list[float] = []
         if not is_warmup and replay_buffer.size >= cfg.batch_size:
-            critic_losses = []
-            actor_losses = []
-            bc_losses = []
-
             for update_idx in range(cfg.utd_ratio):
                 batch = replay_buffer.sample(cfg.batch_size, device)
 
@@ -535,21 +534,24 @@ def train(args: argparse.Namespace) -> None:
                 soft_update_target(target_critic, critic, cfg.tau)
                 total_updates += 1
 
-            # Log training metrics.
-            log_dict = {
-                "train/episode": episode,
-                "train/ep_reward": ep_reward,
-                "train/ep_steps": ep_steps,
-                "train/buffer_size": replay_buffer.size,
-                "train/total_env_steps": total_env_steps,
-                "train/critic_loss": np.mean(critic_losses),
-                "train/success": float(env.task_completed()),
-            }
-            if actor_losses:
-                log_dict["train/actor_loss"] = np.mean(actor_losses)
-            if bc_losses:
-                log_dict["train/bc_loss"] = np.mean(bc_losses)
-            wandb.log(log_dict, step=episode)
+        # Log per-episode metrics (includes warmup episodes).
+        log_dict = {
+            "train/episode": episode,
+            "train/ep_reward": ep_reward,
+            "train/ep_steps": ep_steps,
+            "train/buffer_size": replay_buffer.size,
+            "train/total_env_steps": total_env_steps,
+            "train/total_updates": total_updates,
+            "train/is_warmup": float(is_warmup),
+            "train/success": float(env.task_completed()),
+        }
+        if critic_losses:
+            log_dict["train/critic_loss"] = float(np.mean(critic_losses))
+        if actor_losses:
+            log_dict["train/actor_loss"] = float(np.mean(actor_losses))
+        if bc_losses:
+            log_dict["train/bc_loss"] = float(np.mean(bc_losses))
+        wandb.log(log_dict, step=episode)
 
         # Log episode info.
         logger.info(
