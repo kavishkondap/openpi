@@ -86,7 +86,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--decoder_heads", type=int, default=8)
 
     parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument("--wandb_enabled", action="store_true")
+    parser.add_argument("--wandb_disabled", action="store_true")
     parser.add_argument("--project_name", type=str, default="openpi_rlt")
     parser.add_argument("--overwrite", action="store_true")
     return parser.parse_args()
@@ -281,7 +281,7 @@ def train(args: argparse.Namespace) -> None:
     save_dir.mkdir(parents=True, exist_ok=True)
 
     # --- Wandb ---
-    if args.wandb_enabled:
+    if not args.wandb_disabled:
         wandb.init(name=args.exp_name, project=args.project_name, config=vars(args))
     else:
         wandb.init(mode="disabled")
